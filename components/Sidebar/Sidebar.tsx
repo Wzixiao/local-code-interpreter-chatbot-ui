@@ -1,6 +1,7 @@
 import { IconFolderPlus, IconMistOff, IconPlus } from '@tabler/icons-react';
-import { ReactNode } from 'react';
+import { ReactNode, Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Conversation } from '@/types/chat';
 
 import {
   CloseSidebarButton,
@@ -12,8 +13,10 @@ import Search from '../Search';
 interface Props<T> {
   isOpen: boolean;
   addItemButtonTitle: string;
+  triggerButtonTitle?: string;
   side: 'left' | 'right';
   items: T[];
+  selectedConversation?: Conversation;
   itemComponent: ReactNode;
   folderComponent: ReactNode;
   footerComponent?: ReactNode;
@@ -21,6 +24,7 @@ interface Props<T> {
   handleSearchTerm: (searchTerm: string) => void;
   toggleOpen: () => void;
   handleCreateItem: () => void;
+  handletrigger?:() => void;
   handleCreateFolder: () => void;
   handleDrop: (e: any) => void;
 }
@@ -28,8 +32,10 @@ interface Props<T> {
 const Sidebar = <T,>({
   isOpen,
   addItemButtonTitle,
+  triggerButtonTitle,
   side,
   items,
+  selectedConversation,
   itemComponent,
   folderComponent,
   footerComponent,
@@ -37,6 +43,7 @@ const Sidebar = <T,>({
   handleSearchTerm,
   toggleOpen,
   handleCreateItem,
+  handletrigger,
   handleCreateFolder,
   handleDrop,
 }: Props<T>) => {
@@ -59,57 +66,125 @@ const Sidebar = <T,>({
       <div
         className={`fixed top-0 ${side}-0 z-40 flex h-full w-[260px] flex-none flex-col space-y-2 bg-[#202123] p-2 text-[14px] transition-all sm:relative sm:top-0`}
       >
-        <div className="flex items-center">
-          <button
-            className="text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
-            onClick={() => {
-              handleCreateItem();
-              handleSearchTerm('');
-            }}
-          >
-            <IconPlus size={16} />
-            {addItemButtonTitle}
-          </button>
-
-          <button
-            className="ml-2 flex flex-shrink-0 cursor-pointer items-center gap-3 rounded-md border border-white/20 p-3 text-sm text-white transition-colors duration-200 hover:bg-gray-500/10"
-            onClick={handleCreateFolder}
-          >
-            <IconFolderPlus size={16} />
-          </button>
-        </div>
-        <Search
-          placeholder={t('Search...') || ''}
-          searchTerm={searchTerm}
-          onSearch={handleSearchTerm}
-        />
-
-        <div className="flex-grow overflow-auto">
-          {items?.length > 0 && (
-            <div className="flex border-b border-white/20 pb-2">
-              {folderComponent}
-            </div>
-          )}
-
-          {items?.length > 0 ? (
-            <div
-              className="pt-2"
-              onDrop={handleDrop}
-              onDragOver={allowDrop}
-              onDragEnter={highlightDrop}
-              onDragLeave={removeHighlight}
+        {side === 'right' ? (
+          <div>
+            <button
+              className="w100 text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
+              onClick={() => {
+                handletrigger !== undefined ? handletrigger() : '';
+              }}
             >
-              {itemComponent}
+              {triggerButtonTitle}
+            </button>
+            {triggerButtonTitle === 'Prompt' ? 
+            <Fragment>
+            <div className="flex items-center">
+              <button
+                className="text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
+                onClick={() => {
+                  handleCreateItem();
+                  handleSearchTerm('');
+                }}
+              >
+                <IconPlus size={16} />
+                {addItemButtonTitle}
+                
+              </button>
+              
+              <button
+                className="ml-2 flex flex-shrink-0 cursor-pointer items-center gap-3 rounded-md border border-white/20 p-3 text-sm text-white transition-colors duration-200 hover:bg-gray-500/10"
+                onClick={handleCreateFolder}
+              >
+                <IconFolderPlus size={16} />
+              </button>
             </div>
-          ) : (
-            <div className="mt-8 select-none text-center text-white opacity-50">
-              <IconMistOff className="mx-auto mb-3" />
-              <span className="text-[14px] leading-normal">
-                {t('No data.')}
-              </span>
+            <div className="flex-grow overflow-auto">
+              {items?.length > 0 && (
+                <div className="flex border-b border-white/20 pb-2">
+                  {folderComponent}
+                </div>
+              )}
+
+              {items?.length > 0 ? (
+                <div
+                  className="pt-2"
+                  onDrop={handleDrop}
+                  onDragOver={allowDrop}
+                  onDragEnter={highlightDrop}
+                  onDragLeave={removeHighlight}
+                >
+                  {itemComponent}
+                </div>
+              ) : (
+                <div className="mt-8 select-none text-center text-white opacity-50">
+                  <IconMistOff className="mx-auto mb-3" />
+                  <span className="text-[14px] leading-normal">
+                    {t('No data.')}
+                  </span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </Fragment> : 
+            <div>
+              {selectedConversation?.messages.map((message, i) => {
+                return (<div></div>)
+              })}
+            </div>
+            }
+          </div>
+          ) : <Fragment>
+                <div className="flex items-center">
+                  <button
+                    className="text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
+                    onClick={() => {
+                      handleCreateItem();
+                      handleSearchTerm('');
+                    }}
+                  >
+                    <IconPlus size={16} />
+                    {addItemButtonTitle}
+                    
+                  </button>
+                  
+                  <button
+                    className="ml-2 flex flex-shrink-0 cursor-pointer items-center gap-3 rounded-md border border-white/20 p-3 text-sm text-white transition-colors duration-200 hover:bg-gray-500/10"
+                    onClick={handleCreateFolder}
+                  >
+                    <IconFolderPlus size={16} />
+                  </button>
+                </div>
+                <div className="flex-grow overflow-auto">
+                  {items?.length > 0 && (
+                    <div className="flex border-b border-white/20 pb-2">
+                      {folderComponent}
+                    </div>
+                  )}
+
+                  {items?.length > 0 ? (
+                    <div
+                      className="pt-2"
+                      onDrop={handleDrop}
+                      onDragOver={allowDrop}
+                      onDragEnter={highlightDrop}
+                      onDragLeave={removeHighlight}
+                    >
+                      {itemComponent}
+                    </div>
+                  ) : (
+                    <div className="mt-8 select-none text-center text-white opacity-50">
+                      <IconMistOff className="mx-auto mb-3" />
+                      <span className="text-[14px] leading-normal">
+                        {t('No data.')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </Fragment>
+          }
+        
+      
+
+      
         {footerComponent}
       </div>
 

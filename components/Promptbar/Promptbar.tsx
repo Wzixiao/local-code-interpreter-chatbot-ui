@@ -28,6 +28,12 @@ const Promptbar = () => {
   });
 
   const {
+    state: {
+      selectedConversation,
+    },
+  } = useContext(HomeContext);
+
+  const {
     state: { prompts, defaultModelId, showPromptbar },
     dispatch: homeDispatch,
     handleCreateFolder,
@@ -37,6 +43,16 @@ const Promptbar = () => {
     state: { searchTerm, filteredPrompts },
     dispatch: promptDispatch,
   } = promptBarContextValue;
+
+  const [triggerButtonTitle, setTriggerButtonTitle]  = useState('Code')
+  const handletrigger = () => {
+    if (triggerButtonTitle == 'Code') {
+      setTriggerButtonTitle('Prompt')
+    }else{
+      setTriggerButtonTitle('Code')
+    }
+    console.log(triggerButtonTitle)
+  }
 
   const handleTogglePromptbar = () => {
     homeDispatch({ field: 'showPromptbar', value: !showPromptbar });
@@ -123,12 +139,15 @@ const Promptbar = () => {
         handleCreatePrompt,
         handleDeletePrompt,
         handleUpdatePrompt,
+        handletrigger
       }}
     >
       <Sidebar<Prompt>
         side={'right'}
         isOpen={showPromptbar}
         addItemButtonTitle={t('New prompt')}
+        selectedConversation={selectedConversation}
+        triggerButtonTitle={triggerButtonTitle}
         itemComponent={
           <Prompts
             prompts={filteredPrompts.filter((prompt) => !prompt.folderId)}
@@ -144,6 +163,7 @@ const Promptbar = () => {
         handleCreateItem={handleCreatePrompt}
         handleCreateFolder={() => handleCreateFolder(t('New folder'), 'prompt')}
         handleDrop={handleDrop}
+        handletrigger={handletrigger}
       />
     </PromptbarContext.Provider>
   );

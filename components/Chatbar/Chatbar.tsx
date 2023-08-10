@@ -40,7 +40,6 @@ export const Chatbar = () => {
     handleNewConversation,
     handleUpdateConversation,
   } = useContext(HomeContext);
-
   const {
     state: { searchTerm, filteredConversations },
     dispatch: chatDispatch,
