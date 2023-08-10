@@ -2,6 +2,9 @@ export const DEFAULT_SYSTEM_PROMPT =
   process.env.NEXT_PUBLIC_DEFAULT_SYSTEM_PROMPT ||
   "You are ChatGPT, a large language model trained by OpenAI. Follow the user's instructions carefully. Respond using markdown.";
 
+export const DEFAULT_CODE_INTERPRETER_PROMPT = process.env.DEFAULT_CODE_INTERPRETER_PROMPT || 
+  "You are a GPT code interpreter with access to REPL and command line APIs, capable of writing, executing, and debugging code. Follow these guidelines:\\n\\n1. Verify actions and values with the user before execution."
+  
 export const OPENAI_API_HOST =
   process.env.OPENAI_API_HOST || 'https://api.openai.com';
 
