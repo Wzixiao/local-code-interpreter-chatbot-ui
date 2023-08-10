@@ -1,124 +1,196 @@
 from flask import Flask, request, jsonify, stream_with_context, Response
 from jupyter_client import KernelManager
-import uuid
 import json
-import subprocess  # 用于执行 shell 指令
+import subprocess
 from flask_cors import CORS, cross_origin
 import logging
 import atexit
 
 logging.basicConfig(level="INFO")
 
-app = Flask(__name__)
-CORS(app)
+
+class KernelSessionManager:
+    """
+    A manager for Jupyter kernel sessions.
+    """
+    def __init__(self):
+        self.kernels = {}
+
+    def get_or_create_kernel(self, session_id: str, force_create: bool = True) -> KernelManager:
+        """
+        Fetches the kernel for a given session ID or creates one if not available.
+        
+        Args:
+            session_id (str): The unique session identifier.
+            force_create (bool): Whether to forcefully create a kernel if not exists. Default is True.
+            
+        Returns:
+            KernelManager: The Jupyter kernel manager instance.
+        """
+        if session_id not in self.kernels and force_create:
+            km = KernelManager(kernel_name='python3')
+            km.start_kernel()
+            self.kernels[session_id] = km
+        return self.kernels.get(session_id)
+
+    def shutdown_kernels(self):
+        """
+        Shuts down all active kernels.
+        """
+        for session_id, km in self.kernels.items():
+            try:
+                km.shutdown_kernel()
+                logging.info(f"Shutdown kernel for session {session_id}")
+            except Exception as e:
+                logging.error(f"Failed to shutdown kernel for session {session_id}. Error: {e}")
 
 
-# 存储所有活跃的 kernel
-kernels = {}
+class ExecutionService:
+    """
+    A service to execute Python code or shell commands using Jupyter kernels.
+    """
+    def __init__(self, kernel_manager, session_id):
+        self.km = kernel_manager.get_or_create_kernel(session_id)
+        self.session_id = session_id
 
-@cross_origin()
-@app.route('/execute', methods=['POST'])
-def execute():
-    execution_data = request.json.get('executionData')
-    session_id = request.json.get('sessionId')
+    def format_sse(self, content: str, is_end: bool = False) -> str:
+        """
+        Formats the given content into Server-Sent Events (SSE) format.
+        
+        Args:
+            content (str): The content to be formatted.
+            is_end (bool, optional): Indicates if the content is the last message. Defaults to False.
+            
+        Returns:
+            str: The content formatted in SSE format.
+        """
+        data = {
+            "content": content,
+            "end": is_end,
+            "session_id": self.session_id
+        }
+        message = json.dumps(data)
+        logging.info(f"message: {message}")
+        return f"data: {message}\n\n"
 
-    logging.info(f"session_id: {session_id}",)
-
-    if not execution_data:
-        return jsonify({"error": "No execution data provided"}), 400
-
-    if "code" in execution_data:
-        action = "python"
-        code_or_command = execution_data["code"]
-    elif "command" in execution_data:
-        action = "shell"
-        code_or_command = execution_data["command"]
-    else:
-        return jsonify({"error": "Invalid execution data"}), 400
-
-    # 为新 session 创建 kernel
-    if not session_id:
-        session_id = str(uuid.uuid4())
-
-    if session_id not in kernels:
-        km = KernelManager(kernel_name='python3')
-        km.start_kernel()
-        kernels[session_id] = km
-
-    if action == "python":
-        return Response(stream_with_context(run_code(code_or_command, kernels[session_id], session_id)), content_type="text/event-stream")
-    else:  # action == "shell"
-        return Response(stream_with_context(run_shell(code_or_command, session_id)), content_type="text/event-stream")
-
-
-def shutdown_kernels():
-    for session_id, km in kernels.items():
+    def run_shell(self, command):
+        """
+        Executes a shell command and yields its output.
+        
+        Args:
+            command (str): The shell command to execute.
+            
+        Yields:
+            str: The shell output in SSE format.
+        """
         try:
-            km.shutdown_kernel()
-            logging.info(f"Shutdown kernel for session {session_id}")
+            shell_output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT).decode("utf-8")
+            yield self.format_sse(shell_output, True)
         except Exception as e:
-            logging.error(f"Failed to shutdown kernel for session {session_id}. Error: {e}")
+            yield self.format_sse(str(e), True)
 
+    def run_code(self, code):
+        """
+        Executes Python code using a Jupyter kernel and yields its output.
+        
+        Args:
+            code (str): The Python code to execute.
+            
+        Yields:
+            str: The Python code output in SSE format.
+        """
+        client = self.km.client()
+        client.start_channels()
+        client.allow_stdin = False
 
-atexit.register(shutdown_kernels)
+        output_received = False
 
+        try:
+            msg_id = client.execute(code)
+            while True:
+                msg = client.get_iopub_msg()
+                msg_type = msg['msg_type']
+                content = msg['content']
 
-def run_shell(command, session_id):
-    try:
-        shell_output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT).decode("utf-8")
-        yield format_sse(shell_output, session_id, True)
-    except Exception as e:
-        yield format_sse(str(e), session_id, True)
+                if msg['parent_header'].get('msg_id') == msg_id:
+                    if msg_type in ['stream', 'execute_result', 'error']:
+                        output_received = True
 
+                        if msg_type == 'stream':
+                            yield self.format_sse(content['text'])
+                        elif msg_type == 'execute_result':
+                            yield self.format_sse(content['data'].get('text/plain', ''))
+                        elif msg_type == 'error':
+                            yield self.format_sse("\n".join(content['traceback']))
 
-def run_code(code, km, session_id):
-    client = km.client()
-    client.start_channels()
-    client.allow_stdin = False
+                if msg_type == 'status' and content.get('execution_state') == 'idle':
+                    if not output_received:
+                        yield self.format_sse("No output from the code execution.")
+                    else:
+                        yield self.format_sse("")
+                    break
 
-    output_received = False
+        finally:
+            yield self.format_sse("", True)
 
-    try:
-        msg_id = client.execute(code)
-        while True:
-            msg = client.get_iopub_msg()
-            msg_type = msg['msg_type']
-            content = msg['content']
+class AppService:
+    """
+    The main application service for handling incoming requests.
+    """
+    def __init__(self):
+        self.app = Flask(__name__)
+        CORS(self.app)
+        self.kernel_manager = KernelSessionManager()
+        atexit.register(self.kernel_manager.shutdown_kernels)
+        
+        # 创建一个映射，其中function名映射到ExecutionService的方法
+        self.function_map = {
+            "run_shell": self.execute_with_service("run_shell"),
+            "run_code": self.execute_with_service("run_code")
+        }
 
-            if msg['parent_header'].get('msg_id') == msg_id:
-                if msg_type in ['stream', 'execute_result', 'error']:
-                    output_received = True
-                    
-                    if msg_type == 'stream':
-                        yield format_sse(content['text'], session_id)
-                    elif msg_type == 'execute_result':
-                        yield format_sse(content['data'].get('text/plain', ''), session_id)
-                    elif msg_type == 'error':
-                        yield format_sse("\n".join(content['traceback']), session_id)
-          
-            if msg_type == 'status' and content.get('execution_state') == 'idle':
-                if not output_received:
-                    yield format_sse("No output from the code execution.", session_id)
-                else:
-                    yield format_sse("", session_id)
-                break
+        @self.app.route('/execute', methods=['POST'])
+        def execute():
+            arguments = request.json.get('arguments')
+            session_id = request.json.get('sessionId')
+            functionName = request.json.get('functionName')
 
-    finally:
-        yield format_sse("", session_id, True)
-        pass
+            logging.info(f"session_id: {session_id}")
+            logging.info(f"arguments: {arguments}")
+            logging.info(f"functionName: {functionName}")
 
+            if not functionName or not session_id or not arguments:
+                return jsonify({"error": "No execution data provided"}), 400
 
-def format_sse(content: str, session_id:str, is_end: bool = False) -> str:
-    data = {
-        "content": content,
-        "end": is_end,
-        "session_id": session_id
-    }
-    message = json.dumps(data)
-    logging.info(f"message: {message}",)
-    return f"data: {message}\n\n"
+            function = self.function_map.get(functionName)
+            if not function:
+                return jsonify({"error": f"Unknown function name {functionName}"}), 400
 
+            return Response(stream_with_context(function(session_id, **arguments)), content_type="text/event-stream")
+
+    def execute_with_service(self, method_name):
+        """
+        Creates a function to execute the desired method on the ExecutionService using a specific session.
+        
+        Args:
+            method_name (str): The method name to be executed on the ExecutionService.
+            
+        Returns:
+            function: A function that accepts a session_id and keyword arguments to execute the specified method.
+        """
+        def inner_function(session_id, **kwargs):
+            execution_service = ExecutionService(self.kernel_manager, session_id)
+            method = getattr(execution_service, method_name)
+            return method(**kwargs)
+        return inner_function
+
+    def run(self):
+        """
+        Runs the Flask app.
+        """
+        self.app.run(debug=True)
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app_service = AppService()
+    app_service.run()

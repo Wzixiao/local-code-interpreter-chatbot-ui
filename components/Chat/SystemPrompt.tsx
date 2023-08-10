@@ -20,12 +20,14 @@ import { VariableModal } from './VariableModal';
 interface Props {
   conversation: Conversation;
   prompts: Prompt[];
+  prompt: string;
   onChangePrompt: (prompt: string) => void;
 }
 
 export const SystemPrompt: FC<Props> = ({
   conversation,
   prompts,
+  prompt,
   onChangePrompt,
 }) => {
   const { t } = useTranslation('chat');
@@ -212,7 +214,7 @@ export const SystemPrompt: FC<Props> = ({
         placeholder={
           t(`Enter a prompt or type "/" to select a prompt...`) || ''
         }
-        value={t(value) || ''}
+        value={prompt || t(value) || ''}
         rows={1}
         onChange={handleChange}
         onKeyDown={handleKeyDown}

@@ -1,7 +1,10 @@
-import { Message } from '@/types/chat';
+import { Message, CodeExcuteResult } from '@/types/chat';
 import { OpenAIModel } from '@/types/openai';
 
+import { GptFunction } from "@/types/functions"
 import { AZURE_DEPLOYMENT_ID, OPENAI_API_HOST, OPENAI_API_TYPE, OPENAI_API_VERSION, OPENAI_ORGANIZATION } from '../app/const';
+
+import { GptAnswerJson } from "@/types/chat"
 
 import {
   ParsedEvent,
@@ -22,13 +25,15 @@ export class OpenAIError extends Error {
     this.code = code;
   }
 }
-
+// funcations， function_call
 export const OpenAIStream = async (
   model: OpenAIModel,
   systemPrompt: string,
   temperature : number,
   key: string,
   messages: Message[],
+  functions :GptFunction[] | undefined,
+  function_call: "auto" | undefined | null,
 ) => {
   let url = `${OPENAI_API_HOST}/v1/chat/completions`;
   if (OPENAI_API_TYPE === 'azure') {
@@ -60,10 +65,11 @@ export const OpenAIStream = async (
       max_tokens: 1000,
       temperature: temperature,
       stream: true,
+      functions,
+      function_call
     }),
   });
 
-  const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
   if (res.status !== 200) {
@@ -84,34 +90,35 @@ export const OpenAIStream = async (
     }
   }
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const onParse = (event: ParsedEvent | ReconnectInterval) => {
-        if (event.type === 'event') {
-          const data = event.data;
 
-          try {
-            const json = JSON.parse(data);
-            if (json.choices[0].finish_reason != null) {
-              controller.close();
-              return;
-            }
-            const text = json.choices[0].delta.content;
-            const queue = encoder.encode(text);
-            controller.enqueue(queue);
-          } catch (e) {
-            controller.error(e);
-          }
-        }
-      };
-
-      const parser = createParser(onParse);
-
-      for await (const chunk of res.body as any) {
-        parser.feed(decoder.decode(chunk));
-      }
-    },
-  });
-
-  return stream;
+  return res.body;
 };
+
+
+export const processSSEStream = async <T>(readableStream: ReadableStream<Uint8Array>, onMessage: (message:T) => void) => {
+  const decoder = new TextDecoder(); // 用于将Uint8Array转换为字符串
+  const reader = readableStream.getReader();
+
+  while (true) {
+    const { value, done } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    const strValue = decoder.decode(value, { stream: true });
+
+    if (strValue.indexOf("[DONE]") != -1){
+      break
+    }
+    
+    const jsonStrList = strValue.split("data: ")
+
+    for (let chunk of jsonStrList){
+      if (chunk){
+        const chunkJson: T = JSON.parse(chunk)
+        onMessage(chunkJson)
+      }
+    }
+  }
+}
