@@ -1,11 +1,17 @@
 import { OpenAIModel } from './openai';
 import { GptFunction } from "@/types/functions"
 
+export type FuncationName = "run_code" | "run_shell"
+
+export interface FunctionCall{
+  name: FuncationName,
+  arguments: string
+}
+
 export interface Message {
   role: Role;
-  content: string;
-  functionCall?: boolean;
-  excuteResult?: string
+  content: string | null;
+  function_call?: FunctionCall
 }
 
 export type Role = 'assistant' | 'user';

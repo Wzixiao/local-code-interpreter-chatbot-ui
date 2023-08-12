@@ -77,52 +77,41 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   const [prompt, setPrompt] = useState("");
 
   const handleSend = useCallback(
-    async (message: Message, deleteCount = 0, plugin: Plugin | null = null, newSelectedConversation: Conversation | null = null) => {
+    async (message: Message, deleteCount = 0, plugin: Plugin | null = null) => {
       if (selectedConversation) {
         let updatedConversation: Conversation;
 
         let messages: Message[] = []
 
-        if (newSelectedConversation) {
-          messages = [...newSelectedConversation.messages, message]
-        } else {
-          if (deleteCount) {
-            const updatedMessages = [...selectedConversation.messages];
-            for (let i = 0; i < deleteCount; i++) {
-              updatedMessages.pop();
-            }
-            messages = [...updatedMessages, message]
-            // updatedConversation = {
-            //   ...selectedConversation,
-            //   messages: [...updatedMessages, message],
-            // };
-          } else {
-            messages = [...selectedConversation.messages, message]
-            // updatedConversation = {
-            //   ...selectedConversation,
-            //   messages: [...selectedConversation.messages, message],
-            // };
+        if (deleteCount) {
+          const updatedMessages = [...selectedConversation.messages];
+          for (let i = 0; i < deleteCount; i++) {
+            updatedMessages.pop();
           }
+          messages = [...updatedMessages, message]
+        } else {
+          messages = [...selectedConversation.messages, message]
         }
+        
 
-        if (messages.length >= 2 && messages[messages.length - 2].excuteResult) {
-          messages.pop()
-        }
+        // if (messages.length >= 2 && messages[messages.length - 2].excuteResult) {
+        //   messages.pop()
+        // }
 
         const formatMessages: Message[] = []
 
-        for (const unprocessedMessage of messages) {
-          formatMessages.push({
-            role: unprocessedMessage.role,
-            content: unprocessedMessage.content
-          })
-          if (unprocessedMessage.functionCall && unprocessedMessage.excuteResult) {
-            formatMessages.push({
-              role: "user",
-              content: unprocessedMessage.excuteResult.substring(0, 5000)
-            })
-          }
-        }
+        // for (const unprocessedMessage of messages) {
+        //   formatMessages.push({
+        //     role: unprocessedMessage.role,
+        //     content: unprocessedMessage.content
+        //   })
+        //   if (unprocessedMessage.functionCall && unprocessedMessage.excuteResult) {
+        //     formatMessages.push({
+        //       role: "user",
+        //       content: unprocessedMessage.excuteResult.substring(0, 5000)
+        //     })
+        //   }
+        // }
 
 
         updatedConversation = {
@@ -197,12 +186,12 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
         if (!plugin) {
           if (updatedConversation.messages.length === 1) {
             const { content } = message;
-            const customName =
-              content.length > 30 ? content.substring(0, 30) + '...' : content;
-            updatedConversation = {
-              ...updatedConversation,
-              name: customName,
-            };
+            // const customName =
+            //   content.length > 30 ? content.substring(0, 30) + '...' : content;
+            // updatedConversation = {
+            //   ...updatedConversation,
+            //   name: customName,
+            // };
           }
 
           homeDispatch({ field: 'loading', value: false });
@@ -221,7 +210,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
               const updatedMessages: Message[] = [
                 ...updatedConversation.messages,
-                { role: 'assistant', content: chunkChatContent!, functionCall: isFunctionCall },
+                { role: 'assistant', content: chunkChatContent! },
               ];
 
               updatedConversation = {
@@ -278,7 +267,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
           text = answer
           const updatedMessages: Message[] = [
             ...updatedConversation.messages,
-            { role: 'assistant', content: answer, functionCall: false },
+            { role: 'assistant', content: answer },
           ];
           updatedConversation = {
             ...updatedConversation,
@@ -338,11 +327,11 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
               ];
               excuteResult += result.content
               const lastMessage = updatedMessages[updatedMessages.length - 1];
-              if (lastMessage && lastMessage.excuteResult) {
-                lastMessage.excuteResult += result.content
-              } else if (lastMessage) {
-                lastMessage.excuteResult = result.content
-              }
+              // if (lastMessage && lastMessage.excuteResult) {
+              //   lastMessage.excuteResult += result.content
+              // } else if (lastMessage) {
+              //   lastMessage.excuteResult = result.content
+              // }
 
 
               updatedConversation = {
@@ -361,7 +350,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
               await handleSend({
                 content: excuteResult.substring(0, 500),
                 role: "user",
-              }, undefined, undefined, updatedConversation)
+              }, undefined, undefined)
             }
 
           }
