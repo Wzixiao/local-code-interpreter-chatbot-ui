@@ -19,12 +19,13 @@ import {
   updateConversation,
 } from '@/utils/app/conversation';
 import { throttle } from '@/utils/data/throttle';
+import cloneDeep from 'lodash/cloneDeep'
 
-
+import { cleanTreminalColorText } from "@/utils/app/clean"
 import { ChatBody, Conversation, Message, GptAnswerJson, CodeExcuteResult } from '@/types/chat';
 import { Plugin } from '@/types/plugin';
 import { processSSEStream } from "@/utils/server/index"
-
+import { generatePromptByMessageContent } from "@/utils/app/analyze"
 
 import HomeContext from '@/pages/api/home/home.context';
 
@@ -76,54 +77,84 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
   const [prompt, setPrompt] = useState("");
 
+
+  function updateConversationByMessageContent(conversation: Conversation, result: string) {
+    const updatedMessages = [...conversation.messages];
+    const lastMessage = updatedMessages[updatedMessages.length - 1];
+    lastMessage.excuteResult = result;
+    const updatedConversation = {
+      ...conversation,
+      messages: updatedMessages,
+    };
+    homeDispatch({
+      field: 'selectedConversation',
+      value: updatedConversation,
+    });
+  }
+
+
+  const constructConversation = async (conversation: Conversation, isCodeinterpreter: boolean = false): Promise<Response> => {
+    const endpoint = getEndpoint(null);
+    const controller = new AbortController();
+    const conversationCopy = cloneDeep(conversation)
+    conversationCopy.messages = conversationCopy.messages.map((item: Message):Message=>{
+      return {
+        ...item,
+        content: item.role === "assistant" ? generatePromptByMessageContent(item.content) : item.content
+      }
+    })
+
+    if (conversationCopy.messages[conversation.messages.length - 1].role === "assistant"){
+      conversationCopy.messages.push({
+        role: "user",
+        content: "continue"
+      })
+    }
+
+
+    const chatBody: ChatBody = {
+      model: conversationCopy.model,
+      messages: conversationCopy.messages,
+      key: apiKey,
+      prompt: prompt,
+      temperature: conversationCopy.temperature
+    };
+
+    console.log(" conversation.messages", conversationCopy.messages);
+    
+    if (isCodeinterpreter) {
+      chatBody.funcations = DEFAULT_FUNCTIONS
+      chatBody.function_call = "auto"
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify(chatBody),
+    });
+
+    return response
+  }
+
+
   const handleSend = useCallback(
-    async (message: Message, deleteCount = 0, plugin: Plugin | null = null, newSelectedConversation: Conversation | null = null) => {
+    async (message: Message, deleteCount = 0) => {
       if (selectedConversation) {
         let updatedConversation: Conversation;
-
         let messages: Message[] = []
 
-        if (newSelectedConversation) {
-          messages = [...newSelectedConversation.messages, message]
+        if (deleteCount) {
+          const updatedMessages = [...selectedConversation.messages];
+          for (let i = 0; i < deleteCount; i++) {
+            updatedMessages.pop();
+          }
+          messages = [...updatedMessages, message]
         } else {
-          if (deleteCount) {
-            const updatedMessages = [...selectedConversation.messages];
-            for (let i = 0; i < deleteCount; i++) {
-              updatedMessages.pop();
-            }
-            messages = [...updatedMessages, message]
-            // updatedConversation = {
-            //   ...selectedConversation,
-            //   messages: [...updatedMessages, message],
-            // };
-          } else {
-            messages = [...selectedConversation.messages, message]
-            // updatedConversation = {
-            //   ...selectedConversation,
-            //   messages: [...selectedConversation.messages, message],
-            // };
-          }
+          messages = [...selectedConversation.messages, message]
         }
-
-        if (messages.length >= 2 && messages[messages.length - 2].excuteResult) {
-          messages.pop()
-        }
-
-        const formatMessages: Message[] = []
-
-        for (const unprocessedMessage of messages) {
-          formatMessages.push({
-            role: unprocessedMessage.role,
-            content: unprocessedMessage.content
-          })
-          if (unprocessedMessage.functionCall && unprocessedMessage.excuteResult) {
-            formatMessages.push({
-              role: "user",
-              content: unprocessedMessage.excuteResult.substring(0, 5000)
-            })
-          }
-        }
-
 
         updatedConversation = {
           ...selectedConversation,
@@ -134,216 +165,134 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
           field: 'selectedConversation',
           value: updatedConversation,
         });
+
         homeDispatch({ field: 'loading', value: true });
         homeDispatch({ field: 'messageIsStreaming', value: true });
-        const chatBody: ChatBody = {
-          model: updatedConversation.model,
-          messages: formatMessages,
-          key: apiKey,
-          prompt: prompt,
-          temperature: updatedConversation.temperature,
-        };
 
-        if (isCodeinterpreter) {
-          chatBody.funcations = DEFAULT_FUNCTIONS
-          chatBody.function_call = "auto"
-        }
-
-        const endpoint = getEndpoint(plugin);
-        let body;
-        if (!plugin) {
-          body = JSON.stringify(chatBody);
-        } else {
-          body = JSON.stringify({
-            ...chatBody,
-            googleAPIKey: pluginKeys
-              .find((key) => key.pluginId === 'google-search')
-              ?.requiredKeys.find((key) => key.key === 'GOOGLE_API_KEY')?.value,
-            googleCSEId: pluginKeys
-              .find((key) => key.pluginId === 'google-search')
-              ?.requiredKeys.find((key) => key.key === 'GOOGLE_CSE_ID')?.value,
-          });
-        }
-
-        const controller = new AbortController();
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          signal: controller.signal,
-          body,
-        });
-
-        if (!response.ok) {
-          homeDispatch({ field: 'loading', value: false });
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-          toast.error(response.statusText);
-          return;
-        }
-
-        const data = response.body;
-
-        if (!data) {
-          homeDispatch({ field: 'loading', value: false });
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-          return;
-        }
-
-        let isFunctionCall = false
-        let functionName = null
-        let text = ""
-
-        if (!plugin) {
-          if (updatedConversation.messages.length === 1) {
-            const { content } = message;
-            const customName =
-              content.length > 30 ? content.substring(0, 30) + '...' : content;
-            updatedConversation = {
-              ...updatedConversation,
-              name: customName,
-            };
-          }
-
-          homeDispatch({ field: 'loading', value: false });
-          let isFirst = true;
-
-          await processSSEStream<GptAnswerJson>(data, (message: GptAnswerJson) => {
-            const delta = message.choices[0].delta
-            let chunkChatContent = "function_call" in delta ? delta.function_call?.arguments : delta.content
-            isFunctionCall = "function_call" in delta
-
-            text += chunkChatContent;
-
-            if (isFirst) {
-              isFirst = false;
-              functionName = delta.function_call?.name
-
-              const updatedMessages: Message[] = [
-                ...updatedConversation.messages,
-                { role: 'assistant', content: chunkChatContent!, functionCall: isFunctionCall },
-              ];
-
-              updatedConversation = {
-                ...updatedConversation,
-                messages: updatedMessages,
-              };
-
-              homeDispatch({
-                field: 'selectedConversation',
-                value: updatedConversation,
-              });
-
-            } else {
-              const updatedMessages: Message[] =
-                updatedConversation.messages.map((message, index) => {
-                  if (index === updatedConversation.messages.length - 1) {
-                    return {
-                      ...message,
-                      content: text,
-                    };
-                  }
-                  return message;
-                });
-
-              updatedConversation = {
-                ...updatedConversation,
-                messages: updatedMessages,
-              };
-
-              homeDispatch({
-                field: 'selectedConversation',
-                value: updatedConversation,
-              });
-            }
-          })
-
-          saveConversation(updatedConversation);
-          const updatedConversations: Conversation[] = conversations.map(
-            (conversation) => {
-              if (conversation.id === selectedConversation.id) {
-                return updatedConversation;
-              }
-              return conversation;
-            },
-          );
-          if (updatedConversations.length === 0) {
-            updatedConversations.push(updatedConversation);
-          }
-          homeDispatch({ field: 'conversations', value: updatedConversations });
-          saveConversations(updatedConversations);
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-        } else {
-          const { answer } = await response.json();
-          text = answer
-          const updatedMessages: Message[] = [
-            ...updatedConversation.messages,
-            { role: 'assistant', content: answer, functionCall: false },
-          ];
+        // 自定义对话标题
+        if (updatedConversation.messages.length === 1) {
+          const { content } = message;
+          const customName = content.length > 30 ? content.substring(0, 30) + '...' : content;
           updatedConversation = {
             ...updatedConversation,
-            messages: updatedMessages,
+            name: customName,
           };
-          homeDispatch({
-            field: 'selectedConversation',
-            value: updateConversation,
-          });
-          saveConversation(updatedConversation);
-          const updatedConversations: Conversation[] = conversations.map(
-            (conversation) => {
-              if (conversation.id === selectedConversation.id) {
-                return updatedConversation;
-              }
-              return conversation;
-            },
-          );
-          if (updatedConversations.length === 0) {
-            updatedConversations.push(updatedConversation);
-          }
-          homeDispatch({ field: 'conversations', value: updatedConversations });
-          saveConversations(updatedConversations);
-          homeDispatch({ field: 'loading', value: false });
-          homeDispatch({ field: 'messageIsStreaming', value: false });
         }
 
-        if (isFunctionCall) {
-          let codeParams = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-          if (codeParams == "") {
-            codeParams = text + "}".substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+
+        
+        const thisRoundMessage: Message = { role: 'assistant', content: "" }
+        let nonstop = true
+        let isFirst = true
+        while (nonstop) {
+          const response = await constructConversation(updatedConversation, isCodeinterpreter)
+
+          if (!response.ok) {
+            homeDispatch({ field: 'loading', value: false });
+            homeDispatch({ field: 'messageIsStreaming', value: false });
+            toast.error(response.statusText);
+            return;
+          }
+  
+          const data = response.body;
+  
+          if (!data) {
+            homeDispatch({ field: 'loading', value: false });
+            homeDispatch({ field: 'messageIsStreaming', value: false });
+            return;
           }
 
-          if (codeParams != "") {
-            text += "}"
-          }
+          let isFunctionCall = false
+          let functionName: undefined|string = undefined
+          let codeParams = ""
+          let roundFirst = true
+          await processSSEStream<GptAnswerJson>(data, async (message: GptAnswerJson) => {
+            const delta = message.choices[0].delta
+            const chunkChatContent = message.choices[0].finish_reason ? "" : "function_call" in delta ? delta.function_call?.arguments : delta.content
 
-          const response = await fetch("http://localhost:5000/execute", {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              functionName,
-              sessionId: "aaa",
-              arguments: JSON.parse(codeParams)
-            })
-          })
+            if ("function_call" in delta){
+              codeParams += delta.function_call?.arguments 
+            }
 
-          const resultStram = response.body
-          let excuteResult: string = "";
+            thisRoundMessage.content += chunkChatContent
 
-          if (resultStram) {
-            await processSSEStream<CodeExcuteResult>(resultStram, (result: CodeExcuteResult) => {
-              const updatedMessages: Message[] = [
+            let updatedMessages;
+
+            if (isFirst) {
+              updatedMessages = [
                 ...updatedConversation.messages,
+                thisRoundMessage,
               ];
-              excuteResult += result.content
-              const lastMessage = updatedMessages[updatedMessages.length - 1];
-              if (lastMessage && lastMessage.excuteResult) {
-                lastMessage.excuteResult += result.content
-              } else if (lastMessage) {
-                lastMessage.excuteResult = result.content
+              isFirst = false
+              roundFirst = false
+              functionName = delta.function_call?.name
+           
+              isFunctionCall = "function_call" in delta
+            } else {
+              if (roundFirst){
+                roundFirst = false
+                functionName = delta.function_call?.name
+                isFunctionCall = "function_call" in delta
               }
 
+              if (!isFunctionCall){
+                isFunctionCall =  "function_call" in delta
+                functionName = delta.function_call?.name
+              }
+              updatedMessages = updatedConversation.messages.map((message, index) => {
+                if (index === updatedConversation.messages.length - 1) return thisRoundMessage
+                return message;
+              });
+            }
+            console.log("functionName",functionName);
+            
+            updatedConversation = {
+              ...updatedConversation,
+              messages: updatedMessages,
+            };
+
+            homeDispatch({
+              field: 'selectedConversation',
+              value: updatedConversation,
+            });
+
+          })
+
+          if (isFunctionCall) {
+            console.log("codeParams",codeParams);
+            
+            const response = await fetch("http://localhost:5000/execute", {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                functionName,
+                sessionId: "aaa",
+                arguments: JSON.parse(codeParams) // Must be a standard json structure
+              })
+            })
+            
+            if (!response.body) {
+              homeDispatch({ field: 'loading', value: false });
+              homeDispatch({ field: 'messageIsStreaming', value: false });
+              return;
+            }
+
+            let isFirstExecuteCodeResult = true
+            await processSSEStream<CodeExcuteResult>(response.body, async (message: CodeExcuteResult) => {
+
+              if(isFirstExecuteCodeResult){
+                thisRoundMessage.content += "<execute_result>" + message.content
+                isFirstExecuteCodeResult = false
+              }else{
+                thisRoundMessage.content += message.content
+              }
+
+              const updatedMessages = updatedConversation.messages.map((message, index) => {
+                if (index === updatedConversation.messages.length - 1) return thisRoundMessage
+                return message;
+              });
 
               updatedConversation = {
                 ...updatedConversation,
@@ -357,18 +306,42 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
             })
 
-            if (excuteResult) {
-              await handleSend({
-                content: excuteResult.substring(0, 500),
-                role: "user",
-              }, undefined, undefined, updatedConversation)
-            }
+            thisRoundMessage.content += "</execute_result>"
 
+            const updatedMessages = updatedConversation.messages.map((message, index) => {
+              if (index === updatedConversation.messages.length - 1) return thisRoundMessage
+              return message;
+            });
+
+            updatedConversation = {
+              ...updatedConversation,
+              messages: updatedMessages,
+            };
+
+            homeDispatch({
+              field: 'selectedConversation',
+              value: updatedConversation,
+            });
+
+            nonstop = true
+          } else {
+            nonstop = false
           }
 
-
-
         }
+
+        const updatedConversations: Conversation[] = conversations.map(
+          (conversation) => {
+            if (conversation.id === selectedConversation.id) {
+              return updatedConversation;
+            }
+            return conversation;
+          },
+        );
+        saveConversations(updatedConversations);
+        saveConversation(updatedConversation);
+        homeDispatch({ field: 'messageIsStreaming', value: false });
+        homeDispatch({ field: 'loading', value: false });
 
       }
     },
@@ -434,14 +407,6 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     }
   };
   const throttledScrollDown = throttle(scrollDown, 250);
-
-  // useEffect(() => {
-  //   console.log('currentMessage', currentMessage);
-  //   if (currentMessage) {
-  //     handleSend(currentMessage);
-  //     homeDispatch({ field: 'currentMessage', value: undefined });
-  //   }
-  // }, [currentMessage]);
 
   useEffect(() => {
     throttledScrollDown();
@@ -594,21 +559,24 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                   </div>
                 )}
 
-                {selectedConversation?.messages.map((message, index) => (
-                  <MemoizedChatMessage
-                    key={index}
-                    message={message}
-                    messageIndex={index}
-                    onEdit={(editedMessage) => {
-                      setCurrentMessage(editedMessage);
-                      // discard edited message and the ones that come after then resend
-                      handleSend(
-                        editedMessage,
-                        selectedConversation?.messages.length - index,
-                      );
-                    }}
-                  />
-                ))}
+                {selectedConversation?.messages.map((message, index) => {
+
+                  return (
+                    <MemoizedChatMessage
+                      key={index}
+                      message={message}
+                      messageIndex={index}
+                      onEdit={(editedMessage) => {
+                        setCurrentMessage(editedMessage);
+                        // discard edited message and the ones that come after then resend
+                        handleSend(
+                          editedMessage,
+                          selectedConversation?.messages.length - index
+                        );
+                      }}
+                    />
+                  );
+                })}
 
                 {loading && <ChatLoader />}
 
@@ -625,12 +593,12 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
             textareaRef={textareaRef}
             onSend={(message, plugin) => {
               setCurrentMessage(message);
-              handleSend(message, 0, plugin);
+              handleSend(message, 0);
             }}
             onScrollDownClick={handleScrollDown}
             onRegenerate={() => {
               if (currentMessage) {
-                handleSend(currentMessage, 2, null);
+                handleSend(currentMessage, 2);
               }
             }}
             showScrollDownButton={showScrollDownButton}

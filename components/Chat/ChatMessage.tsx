@@ -13,9 +13,9 @@ import { useTranslation } from 'next-i18next';
 import { updateConversation } from '@/utils/app/conversation';
 
 import { Message } from '@/types/chat';
-
+import { cleanTreminalColorText } from "@/utils/app/clean"
 import HomeContext from '@/pages/api/home/home.context';
-
+import { generateMarkdownString } from "@/utils/app/analyze"
 import { CodeBlock } from '../Markdown/CodeBlock';
 import { MemoizedReactMarkdown } from '../Markdown/MemoizedReactMarkdown';
 
@@ -117,6 +117,10 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
   }, [message.content]);
 
 
+
+
+  const viewContent = generateMarkdownString(message.content)
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'inherit';
@@ -124,61 +128,12 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
     }
   }, [isEditing]);
 
-  const markdownLanguageMap = {
-    code: "python",
-    command: "shell"
-  }
-
-  function extractKeyValueAndContent(str: string) {
-    const match = str.match(/"(command|code)"\s*:\s*['"]([^'"]+)/);
-
-    if (match && match[1] && match[2]) {
-      return {
-        key: match[1],
-        content: match[2]
-      };
-    }
-
-    return null;
-  }
-
-  // const 
-
-  let viewContent;
-
-  if (message.functionCall) {
-    const messageContent = message.content
-    const functionArgumentsStr = messageContent.substring(messageContent.indexOf('{'));
-    const keyWithValue = extractKeyValueAndContent(functionArgumentsStr)
-
-    if (!keyWithValue) {
-      viewContent = ""
-    }
-
-    let language;
-    if (keyWithValue && keyWithValue.key && keyWithValue.key in markdownLanguageMap) {
-      language = markdownLanguageMap[keyWithValue.key as keyof typeof markdownLanguageMap]
-    } else {
-      language = ""
-    }
-
-    viewContent = `\`\`\`${language} \n${keyWithValue?.content}\n\`\`\`\n`
-
-
-    if (message.excuteResult) {
-      viewContent += `\`\`\`RESULT\n${JSON.stringify(message.excuteResult)}\n\`\`\``
-    }
-
-  } else {
-    viewContent = message.content
-  }
-
 
   return (
     <div
       className={`group md:px-4 ${message.role === 'assistant'
-          ? 'border-b border-black/10 bg-gray-50 text-gray-800 dark:border-gray-900/50 dark:bg-[#444654] dark:text-gray-100'
-          : 'border-b border-black/10 bg-white text-gray-800 dark:border-gray-900/50 dark:bg-[#343541] dark:text-gray-100'
+        ? 'border-b border-black/10 bg-gray-50 text-gray-800 dark:border-gray-900/50 dark:bg-[#444654] dark:text-gray-100'
+        : 'border-b border-black/10 bg-white text-gray-800 dark:border-gray-900/50 dark:bg-[#343541] dark:text-gray-100'
         }`}
       style={{ overflowWrap: 'anywhere' }}
     >

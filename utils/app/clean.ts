@@ -97,3 +97,14 @@ export const cleanConversationHistory = (history: any[]): Conversation[] => {
     return acc;
   }, []);
 };
+
+
+export const cleanTreminalColorText = (input: string): string => {
+  // 去除颜色编码
+  let cleaned = input.replace(/\x1b\[[0-9;]*m/g, '');
+
+  // 去除其他特殊字符，但保留换行符和常见的标点符号
+  cleaned = cleaned.replace(/[^a-zA-Z0-9\s!@#$%^&*()_+[\]{};:'",.<>?~\\/-]/g, "");
+
+  return cleaned;
+}
