@@ -12,6 +12,8 @@ import { useTranslation } from 'next-i18next';
 
 import { updateConversation } from '@/utils/app/conversation';
 
+import { generateMarkdownString } from "@/utils/app/message"
+
 import { Message } from '@/types/chat';
 
 import HomeContext from '@/pages/api/home/home.context';
@@ -26,10 +28,11 @@ import remarkMath from 'remark-math';
 export interface Props {
   message: Message;
   messageIndex: number;
+  messages: Message[];
   onEdit?: (editedMessage: Message) => void
 }
 
-export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) => {
+export const ChatMessage: FC<Props> = memo(({ message, messageIndex, messages, onEdit }) => {
   const { t } = useTranslation('chat');
 
   const {
@@ -81,6 +84,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
     } else {
       messages.splice(findIndex, 1);
     }
+
     const updatedConversation = {
       ...selectedConversation,
       messages,
@@ -90,6 +94,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
       updatedConversation,
       conversations,
     );
+
     homeDispatch({ field: 'selectedConversation', value: single });
     homeDispatch({ field: 'conversations', value: all });
   };
@@ -104,12 +109,15 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
   const copyOnClick = () => {
     if (!navigator.clipboard) return;
 
-    navigator.clipboard.writeText(message.content).then(() => {
-      setMessageCopied(true);
-      setTimeout(() => {
-        setMessageCopied(false);
-      }, 2000);
-    });
+    if (message.content){
+      navigator.clipboard.writeText(message.content).then(() => {
+        setMessageCopied(true);
+        setTimeout(() => {
+          setMessageCopied(false);
+        }, 2000);
+      });
+    }
+   
   };
 
   useEffect(() => {
@@ -124,56 +132,10 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
     }
   }, [isEditing]);
 
-  const markdownLanguageMap = {
-    code: "python",
-    command: "shell"
-  }
 
-  function extractKeyValueAndContent(str: string) {
-    const match = str.match(/"(command|code)"\s*:\s*['"]([^'"]+)/);
+  const viewCode = generateMarkdownString(messages, messageIndex)
 
-    if (match && match[1] && match[2]) {
-      return {
-        key: match[1],
-        content: match[2]
-      };
-    }
-
-    return null;
-  }
-
-  // const 
-
-  let viewContent;
-
-  if (message.functionCall) {
-    const messageContent = message.content
-    const functionArgumentsStr = messageContent.substring(messageContent.indexOf('{'));
-    const keyWithValue = extractKeyValueAndContent(functionArgumentsStr)
-
-    if (!keyWithValue) {
-      viewContent = ""
-    }
-
-    let language;
-    if (keyWithValue && keyWithValue.key && keyWithValue.key in markdownLanguageMap) {
-      language = markdownLanguageMap[keyWithValue.key as keyof typeof markdownLanguageMap]
-    } else {
-      language = ""
-    }
-
-    viewContent = `\`\`\`${language} \n${keyWithValue?.content}\n\`\`\`\n`
-
-
-    if (message.excuteResult) {
-      viewContent += `\`\`\`RESULT\n${JSON.stringify(message.excuteResult)}\n\`\`\``
-    }
-
-  } else {
-    viewContent = message.content
-  }
-
-
+  
   return (
     <div
       className={`group md:px-4 ${message.role === 'assistant'
@@ -199,7 +161,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
                   <textarea
                     ref={textareaRef}
                     className="w-full resize-none whitespace-pre-wrap border-none dark:bg-[#343541]"
-                    value={messageContent}
+                    value={""}
                     onChange={handleInputChange}
                     onKeyDown={handlePressEnter}
                     onCompositionStart={() => setIsTyping(true)}
@@ -218,7 +180,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
                     <button
                       className="h-[40px] rounded-md bg-blue-500 px-4 py-1 text-sm font-medium text-white enabled:hover:bg-blue-600 disabled:opacity-50"
                       onClick={handleEditMessage}
-                      disabled={messageContent.trim().length <= 0}
+                      disabled={"".trim().length <= 0}
                     >
                       {t('Save & Submit')}
                     </button>
@@ -311,9 +273,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
                   },
                 }}
               >
-                {`${viewContent
-                  }${messageIsStreaming && messageIndex == (selectedConversation?.messages.length ?? 0) - 1 ? '`▍`' : ''
-                  }`}
+                {`${viewCode} ${messageIsStreaming && messageIndex == (messages.length ?? 0) - 1 ? '`▍`' : ''}`}
               </MemoizedReactMarkdown>
 
               <div className="md:-mr-8 ml-1 md:ml-0 flex flex-col md:flex-row gap-4 md:gap-1 items-center md:items-start justify-end md:justify-start">

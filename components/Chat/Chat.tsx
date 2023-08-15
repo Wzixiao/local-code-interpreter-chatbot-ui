@@ -21,7 +21,7 @@ import {
 import { throttle } from '@/utils/data/throttle';
 
 
-import { ChatBody, Conversation, Message, GptAnswerJson, CodeExcuteResult } from '@/types/chat';
+import { ChatBody, Conversation, Message, GptAnswerJson, CodeExcuteResult, } from '@/types/chat';
 import { Plugin } from '@/types/plugin';
 import { processSSEStream } from "@/utils/server/index"
 
@@ -41,6 +41,29 @@ import { CodeInterpreterSelect } from "./CodeInterpreterSelect"
 
 interface Props {
   stopConversationRef: MutableRefObject<boolean>;
+}
+
+const mergeMessage = (oldMessage: Message, newMessage: Message): Message => {
+  if (oldMessage.content) {
+    oldMessage.content += newMessage.content ? newMessage.content : ""
+  } else {
+    oldMessage.content = newMessage.content ? newMessage.content : null
+  }
+
+  if (oldMessage.function_call) {
+    if (newMessage.function_call) {
+      oldMessage.function_call.arguments += newMessage.function_call.arguments
+      if (!oldMessage.function_call.name && newMessage.function_call.name) {
+        oldMessage.function_call.name = newMessage.function_call.name
+      }
+    }
+  } else {
+    if (newMessage.function_call) {
+      oldMessage.function_call = newMessage.function_call
+    }
+  }
+
+  return oldMessage
 }
 
 export const Chat = memo(({ stopConversationRef }: Props) => {
@@ -76,311 +99,267 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
   const [prompt, setPrompt] = useState("");
 
-  const handleSend = useCallback(
-    async (message: Message, deleteCount = 0, plugin: Plugin | null = null, newSelectedConversation: Conversation | null = null) => {
-      if (selectedConversation) {
-        let updatedConversation: Conversation;
 
-        let messages: Message[] = []
-
-        if (newSelectedConversation) {
-          messages = [...newSelectedConversation.messages, message]
-        } else {
-          if (deleteCount) {
-            const updatedMessages = [...selectedConversation.messages];
-            for (let i = 0; i < deleteCount; i++) {
-              updatedMessages.pop();
-            }
-            messages = [...updatedMessages, message]
-            // updatedConversation = {
-            //   ...selectedConversation,
-            //   messages: [...updatedMessages, message],
-            // };
-          } else {
-            messages = [...selectedConversation.messages, message]
-            // updatedConversation = {
-            //   ...selectedConversation,
-            //   messages: [...selectedConversation.messages, message],
-            // };
-          }
-        }
-
-        if (messages.length >= 2 && messages[messages.length - 2].excuteResult) {
-          messages.pop()
-        }
-
-        const formatMessages: Message[] = []
-
-        for (const unprocessedMessage of messages) {
-          formatMessages.push({
-            role: unprocessedMessage.role,
-            content: unprocessedMessage.content
-          })
-          if (unprocessedMessage.functionCall && unprocessedMessage.excuteResult) {
-            formatMessages.push({
-              role: "user",
-              content: unprocessedMessage.excuteResult.substring(0, 5000)
-            })
-          }
-        }
-
-
-        updatedConversation = {
-          ...selectedConversation,
-          messages,
-        };
-
-        homeDispatch({
-          field: 'selectedConversation',
-          value: updatedConversation,
-        });
-        homeDispatch({ field: 'loading', value: true });
-        homeDispatch({ field: 'messageIsStreaming', value: true });
-        const chatBody: ChatBody = {
-          model: updatedConversation.model,
-          messages: formatMessages,
-          key: apiKey,
-          prompt: prompt,
-          temperature: updatedConversation.temperature,
-        };
-
-        if (isCodeinterpreter) {
-          chatBody.funcations = DEFAULT_FUNCTIONS
-          chatBody.function_call = "auto"
-        }
-
-        const endpoint = getEndpoint(plugin);
-        let body;
-        if (!plugin) {
-          body = JSON.stringify(chatBody);
-        } else {
-          body = JSON.stringify({
-            ...chatBody,
-            googleAPIKey: pluginKeys
-              .find((key) => key.pluginId === 'google-search')
-              ?.requiredKeys.find((key) => key.key === 'GOOGLE_API_KEY')?.value,
-            googleCSEId: pluginKeys
-              .find((key) => key.pluginId === 'google-search')
-              ?.requiredKeys.find((key) => key.key === 'GOOGLE_CSE_ID')?.value,
-          });
-        }
-
-        const controller = new AbortController();
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          signal: controller.signal,
-          body,
-        });
-
-        if (!response.ok) {
-          homeDispatch({ field: 'loading', value: false });
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-          toast.error(response.statusText);
-          return;
-        }
-
-        const data = response.body;
-
-        if (!data) {
-          homeDispatch({ field: 'loading', value: false });
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-          return;
-        }
-
-        let isFunctionCall = false
-        let functionName = null
-        let text = ""
-
-        if (!plugin) {
-          if (updatedConversation.messages.length === 1) {
-            const { content } = message;
-            const customName =
-              content.length > 30 ? content.substring(0, 30) + '...' : content;
-            updatedConversation = {
-              ...updatedConversation,
-              name: customName,
-            };
-          }
-
-          homeDispatch({ field: 'loading', value: false });
-          let isFirst = true;
-
-          await processSSEStream<GptAnswerJson>(data, (message: GptAnswerJson) => {
-            const delta = message.choices[0].delta
-            let chunkChatContent = "function_call" in delta ? delta.function_call?.arguments : delta.content
-            isFunctionCall = "function_call" in delta
-
-            text += chunkChatContent;
-
-            if (isFirst) {
-              isFirst = false;
-              functionName = delta.function_call?.name
-
-              const updatedMessages: Message[] = [
-                ...updatedConversation.messages,
-                { role: 'assistant', content: chunkChatContent!, functionCall: isFunctionCall },
-              ];
-
-              updatedConversation = {
-                ...updatedConversation,
-                messages: updatedMessages,
-              };
-
-              homeDispatch({
-                field: 'selectedConversation',
-                value: updatedConversation,
-              });
-
-            } else {
-              const updatedMessages: Message[] =
-                updatedConversation.messages.map((message, index) => {
-                  if (index === updatedConversation.messages.length - 1) {
-                    return {
-                      ...message,
-                      content: text,
-                    };
-                  }
-                  return message;
-                });
-
-              updatedConversation = {
-                ...updatedConversation,
-                messages: updatedMessages,
-              };
-
-              homeDispatch({
-                field: 'selectedConversation',
-                value: updatedConversation,
-              });
-            }
-          })
-
-          saveConversation(updatedConversation);
-          const updatedConversations: Conversation[] = conversations.map(
-            (conversation) => {
-              if (conversation.id === selectedConversation.id) {
-                return updatedConversation;
-              }
-              return conversation;
-            },
-          );
-          if (updatedConversations.length === 0) {
-            updatedConversations.push(updatedConversation);
-          }
-          homeDispatch({ field: 'conversations', value: updatedConversations });
-          saveConversations(updatedConversations);
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-        } else {
-          const { answer } = await response.json();
-          text = answer
-          const updatedMessages: Message[] = [
-            ...updatedConversation.messages,
-            { role: 'assistant', content: answer, functionCall: false },
-          ];
-          updatedConversation = {
-            ...updatedConversation,
-            messages: updatedMessages,
-          };
-          homeDispatch({
-            field: 'selectedConversation',
-            value: updateConversation,
-          });
-          saveConversation(updatedConversation);
-          const updatedConversations: Conversation[] = conversations.map(
-            (conversation) => {
-              if (conversation.id === selectedConversation.id) {
-                return updatedConversation;
-              }
-              return conversation;
-            },
-          );
-          if (updatedConversations.length === 0) {
-            updatedConversations.push(updatedConversation);
-          }
-          homeDispatch({ field: 'conversations', value: updatedConversations });
-          saveConversations(updatedConversations);
-          homeDispatch({ field: 'loading', value: false });
-          homeDispatch({ field: 'messageIsStreaming', value: false });
-        }
-
-        if (isFunctionCall) {
-          let codeParams = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-          if (codeParams == "") {
-            codeParams = text + "}".substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-          }
-
-          if (codeParams != "") {
-            text += "}"
-          }
-
-          const response = await fetch("http://localhost:5000/execute", {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              functionName,
-              sessionId: "aaa",
-              arguments: JSON.parse(codeParams)
-            })
-          })
-
-          const resultStram = response.body
-          let excuteResult: string = "";
-
-          if (resultStram) {
-            await processSSEStream<CodeExcuteResult>(resultStram, (result: CodeExcuteResult) => {
-              const updatedMessages: Message[] = [
-                ...updatedConversation.messages,
-              ];
-              excuteResult += result.content
-              const lastMessage = updatedMessages[updatedMessages.length - 1];
-              if (lastMessage && lastMessage.excuteResult) {
-                lastMessage.excuteResult += result.content
-              } else if (lastMessage) {
-                lastMessage.excuteResult = result.content
-              }
-
-
-              updatedConversation = {
-                ...updatedConversation,
-                messages: updatedMessages,
-              };
-
-              homeDispatch({
-                field: 'selectedConversation',
-                value: updatedConversation,
-              });
-
-            })
-
-            if (excuteResult) {
-              await handleSend({
-                content: excuteResult.substring(0, 500),
-                role: "user",
-              }, undefined, undefined, updatedConversation)
-            }
-
-          }
-
-
-
-        }
-
+  const compressedMessage = (messages: Message[]): Message[] => {
+    return messages.map((message: Message)=>{
+      if (message.role != "function"){
+        return message
       }
-    },
-    [
-      apiKey,
-      conversations,
-      pluginKeys,
-      selectedConversation,
-      stopConversationRef,
-      isCodeinterpreter,
-    ],
-  );
+
+      message.content = message.content
+      return message
+    })
+  }
+
+  const sendGptByConversation = async (conversation: Conversation, isCodeinterpreter: boolean = false): Promise<Response> => {
+    const endpoint = getEndpoint(null);
+    const controller = new AbortController();
+
+    const chatBody: ChatBody = {
+      model: conversation.model,
+      messages: conversation.messages,
+      key: apiKey,
+      prompt: prompt,
+      temperature: conversation.temperature
+    };
+
+    if (isCodeinterpreter) {
+      chatBody.funcations = DEFAULT_FUNCTIONS
+      chatBody.function_call = "auto"
+      chatBody.messages = compressedMessage(chatBody.messages)
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify(chatBody),
+    });
+
+    return response
+  }
+
+  const sendCode = async (functionArguments: string, functionName: string, sessionId: string): Promise<Response> => {
+    const response = await fetch("http://localhost:5000/execute", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        functionName,
+        sessionId,
+        arguments: JSON.parse(functionArguments)
+      }),
+    });
+
+    return response
+  }
+
+  const saveConversationToLoacl = (updatedConversation: Conversation) => {
+
+    saveConversation(updatedConversation);
+    if (conversations.length != 0) {
+      const updatedConversations: Conversation[] = conversations.map(
+        (conversation) => {
+          if (conversation.id === updatedConversation.id) {
+            return updatedConversation;
+          }
+          return conversation;
+        },
+      );
+      saveConversations(updatedConversations);
+    } else {
+      conversations.push(updatedConversation)
+      saveConversations(conversations);
+    }
+  }
+
+  const updateMessagesWithDeletion = (deleteCount: number) => {
+    if (selectedConversation) {
+      const updatedMessages = [...selectedConversation.messages];
+      for (let i = 0; i < deleteCount; i++) {
+        updatedMessages.pop();
+      }
+      return updatedMessages;
+    } else {
+      return []
+    }
+
+  };
+
+  const dispatchLoadingAndStreaming = (loading: boolean, streaming: boolean) => {
+    homeDispatch({ field: 'loading', value: loading });
+    homeDispatch({ field: 'messageIsStreaming', value: streaming });
+  };
+
+  // 辅助函数：处理与GPT的响应
+  const processGptResponse = async (updatedConversation: Conversation): Promise<Conversation | null> => {
+    const response = await sendGptByConversation(updatedConversation, isCodeinterpreter);
+
+    dispatchLoadingAndStreaming(false, true)
+
+    if (updatedConversation.messages.length === 1) {
+      const content = updatedConversation.messages[0].content;
+      if (content){
+        const customName =
+        content.length > 30 ? content.substring(0, 30) + '...' : content;
+      updatedConversation = {
+        ...updatedConversation,
+        name: customName,
+      };
+      }
+    }
+
+
+    if (!response.ok || !response.body) {
+      dispatchLoadingAndStreaming(false, false);
+      toast.error(response.statusText);
+      return null;
+    }
+
+    let assistantMessage: Message = {
+      role: "assistant"
+    };
+    let isFirstTrturnResult = true;
+
+    await processSSEStream<GptAnswerJson>(response.body, async (answer: GptAnswerJson) => {
+      const delta = answer.choices[0].delta;
+      assistantMessage = mergeMessage(assistantMessage, delta);
+
+      if (isFirstTrturnResult) {
+        updatedConversation.messages.push(assistantMessage);
+        isFirstTrturnResult = false;
+      } else {
+        updatedConversation.messages[updatedConversation.messages.length - 1] = assistantMessage;
+      }
+
+      homeDispatch({
+        field: 'selectedConversation',
+        value: updatedConversation,
+      });
+    });
+
+    return updatedConversation;
+  };
+
+  // 辅助函数：处理代码响应
+  const processCodeResponse = async (updatedConversation: Conversation): Promise<Conversation | null> => {
+    const assistantMessage = updatedConversation.messages[updatedConversation.messages.length - 1]
+    const animationTimer = waitCodeExectuteAnimation(updatedConversation)
+    if (!assistantMessage.function_call) {
+      clearInterval(animationTimer)
+      return null
+    };
+
+    const { arguments: functionArguments, name: functionName } = assistantMessage.function_call;
+
+    if (!functionName || !functionArguments) {
+      clearInterval(animationTimer)
+      dispatchLoadingAndStreaming(false, false);
+      return null;
+    }
+
+    const response = await sendCode(functionArguments, functionName, updatedConversation.id);
+
+    if (!response.ok || !response.body) {
+      clearInterval(animationTimer)
+      dispatchLoadingAndStreaming(false, false);
+      return null;
+    }
+
+    const codeMessage: Message = {
+      role: "function",
+      content: "",
+      name: functionName
+    };
+
+    let codeResultIsFirst = true;
+
+    await processSSEStream<CodeExcuteResult>(response.body, async (result: CodeExcuteResult) => {
+      codeMessage.content += result.content;
+
+      if (codeResultIsFirst) {
+        clearInterval(animationTimer)
+        if (updatedConversation.messages[updatedConversation.messages.length - 1].name == "animation"){
+          updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
+        }else{
+          updatedConversation.messages.push(codeMessage);
+        }
+        
+        codeResultIsFirst = false;
+      } else {
+        updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
+      }
+      console.log("updatedConversation", updatedConversation);
+      
+      homeDispatch({
+        field: 'selectedConversation',
+        value: updatedConversation,
+      });
+    });
+
+    return updatedConversation;
+  };
+
+  const waitCodeExectuteAnimation = (updatedConversation: Conversation): NodeJS.Timer => {
+    const animationMessage: Message = {
+      "content": "",
+      "name": "animation",
+      "role": "function"
+    }
+
+    updatedConversation.messages.push(animationMessage)
+    const animationTimer = setInterval(()=>{
+      if (animationMessage.content && animationMessage.content?.length < 3){
+        animationMessage.content += "."
+      } else{
+        animationMessage.content = "."
+      }
+     
+      homeDispatch({
+        field: 'selectedConversation',
+        value: updatedConversation,
+      });
+    }, 200)
+    return animationTimer
+  }
+
+  const handleSend = useCallback(async (message: Message, deleteCount = 0, plugin: Plugin | null = null) => {
+    if (!selectedConversation) return;
+
+    let messages = deleteCount ? updateMessagesWithDeletion(deleteCount) : [...selectedConversation.messages];
+    messages.push(message);
+
+    let updatedConversation: Conversation = {
+      ...selectedConversation,
+      messages,
+    };
+
+    homeDispatch({ field: 'selectedConversation', value: updatedConversation });
+    homeDispatch({ field: 'messageIsStreaming', value: true });
+
+    dispatchLoadingAndStreaming(true, true)
+
+    while (true) {
+      let newUpdatedConversation = await processGptResponse(updatedConversation);
+      if (!newUpdatedConversation) break;
+      updatedConversation = newUpdatedConversation
+
+      saveConversationToLoacl(newUpdatedConversation);
+
+      newUpdatedConversation = await processCodeResponse(newUpdatedConversation);
+      if (!newUpdatedConversation) break;
+      updatedConversation = newUpdatedConversation
+      
+      saveConversationToLoacl(newUpdatedConversation);
+    }
+
+    dispatchLoadingAndStreaming(false, false);
+  },
+    [apiKey, conversations, pluginKeys, selectedConversation, stopConversationRef, isCodeinterpreter]);
+
 
   const scrollToBottom = useCallback(() => {
     if (autoScrollEnabled) {
@@ -434,14 +413,6 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     }
   };
   const throttledScrollDown = throttle(scrollDown, 250);
-
-  // useEffect(() => {
-  //   console.log('currentMessage', currentMessage);
-  //   if (currentMessage) {
-  //     handleSend(currentMessage);
-  //     homeDispatch({ field: 'currentMessage', value: undefined });
-  //   }
-  // }, [currentMessage]);
 
   useEffect(() => {
     throttledScrollDown();
@@ -594,11 +565,14 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                   </div>
                 )}
 
-                {selectedConversation?.messages.map((message, index) => (
+              {selectedConversation?.messages.map((message, index) => (
+                 (message.role === "assistant" || message.role === "user") &&
+                  (index == 0 || (index > 0 && selectedConversation?.messages[index-1].role != "function")) ? (
                   <MemoizedChatMessage
                     key={index}
                     message={message}
                     messageIndex={index}
+                    messages={selectedConversation?.messages}
                     onEdit={(editedMessage) => {
                       setCurrentMessage(editedMessage);
                       // discard edited message and the ones that come after then resend
@@ -608,7 +582,8 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                       );
                     }}
                   />
-                ))}
+                ) : null
+              ))}
 
                 {loading && <ChatLoader />}
 

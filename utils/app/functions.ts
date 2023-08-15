@@ -3,7 +3,7 @@ import { GptFunction } from "@/types/functions"
 const DEFAULT_FUNCTIONS :GptFunction[]= [
     {
         name: "run_code",
-        description: "Exexute code. Note: This endpoint current supports a REPL-like environment for Python only. Args: request (CodeExecutionRequest): The request object containing the code to execute. Returns: CodeExecutionResponse: The result of the code execution.",
+        description: "Exexute python code. Note: This endpoint current supports a REPL-like environment for Python only. Args: request (CodeExecutionRequest): The request object containing the code to execute. Returns: CodeExecutionResponse: The result of the code execution.",
         parameters: {
             type: "object",
             properties: {
