@@ -99,6 +99,18 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
   const [prompt, setPrompt] = useState("");
 
+
+  const compressedMessage = (messages: Message[]): Message[] => {
+    return messages.map((message: Message)=>{
+      if (message.role != "function"){
+        return message
+      }
+
+      message.content = message.content
+      return message
+    })
+  }
+
   const sendGptByConversation = async (conversation: Conversation, isCodeinterpreter: boolean = false): Promise<Response> => {
     const endpoint = getEndpoint(null);
     const controller = new AbortController();
@@ -114,6 +126,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     if (isCodeinterpreter) {
       chatBody.funcations = DEFAULT_FUNCTIONS
       chatBody.function_call = "auto"
+      chatBody.messages = compressedMessage(chatBody.messages)
     }
 
     const response = await fetch(endpoint, {
@@ -128,7 +141,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     return response
   }
 
-  const sendCode = async (functionArguments: string, functionName: string): Promise<Response> => {
+  const sendCode = async (functionArguments: string, functionName: string, sessionId: string): Promise<Response> => {
     const response = await fetch("http://localhost:5000/execute", {
       method: 'POST',
       headers: {
@@ -136,7 +149,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
       },
       body: JSON.stringify({
         functionName,
-        sessionId: "aaa",
+        sessionId,
         arguments: JSON.parse(functionArguments)
       }),
     });
@@ -185,6 +198,21 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   const processGptResponse = async (updatedConversation: Conversation): Promise<Conversation | null> => {
     const response = await sendGptByConversation(updatedConversation, isCodeinterpreter);
 
+    dispatchLoadingAndStreaming(false, true)
+
+    if (updatedConversation.messages.length === 1) {
+      const content = updatedConversation.messages[0].content;
+      if (content){
+        const customName =
+        content.length > 30 ? content.substring(0, 30) + '...' : content;
+      updatedConversation = {
+        ...updatedConversation,
+        name: customName,
+      };
+      }
+    }
+
+
     if (!response.ok || !response.body) {
       dispatchLoadingAndStreaming(false, false);
       toast.error(response.statusText);
@@ -219,18 +247,24 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   // 辅助函数：处理代码响应
   const processCodeResponse = async (updatedConversation: Conversation): Promise<Conversation | null> => {
     const assistantMessage = updatedConversation.messages[updatedConversation.messages.length - 1]
-    if (!assistantMessage.function_call) return null;
+    const animationTimer = waitCodeExectuteAnimation(updatedConversation)
+    if (!assistantMessage.function_call) {
+      clearInterval(animationTimer)
+      return null
+    };
 
     const { arguments: functionArguments, name: functionName } = assistantMessage.function_call;
 
     if (!functionName || !functionArguments) {
+      clearInterval(animationTimer)
       dispatchLoadingAndStreaming(false, false);
       return null;
     }
 
-    const response = await sendCode(functionArguments, functionName);
+    const response = await sendCode(functionArguments, functionName, updatedConversation.id);
 
     if (!response.ok || !response.body) {
+      clearInterval(animationTimer)
       dispatchLoadingAndStreaming(false, false);
       return null;
     }
@@ -247,12 +281,19 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
       codeMessage.content += result.content;
 
       if (codeResultIsFirst) {
-        updatedConversation.messages.push(codeMessage);
+        clearInterval(animationTimer)
+        if (updatedConversation.messages[updatedConversation.messages.length - 1].name == "animation"){
+          updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
+        }else{
+          updatedConversation.messages.push(codeMessage);
+        }
+        
         codeResultIsFirst = false;
       } else {
         updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
       }
-
+      console.log("updatedConversation", updatedConversation);
+      
       homeDispatch({
         field: 'selectedConversation',
         value: updatedConversation,
@@ -261,6 +302,29 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
     return updatedConversation;
   };
+
+  const waitCodeExectuteAnimation = (updatedConversation: Conversation): NodeJS.Timer => {
+    const animationMessage: Message = {
+      "content": "",
+      "name": "animation",
+      "role": "function"
+    }
+
+    updatedConversation.messages.push(animationMessage)
+    const animationTimer = setInterval(()=>{
+      if (animationMessage.content && animationMessage.content?.length < 3){
+        animationMessage.content += "."
+      } else{
+        animationMessage.content = "."
+      }
+     
+      homeDispatch({
+        field: 'selectedConversation',
+        value: updatedConversation,
+      });
+    }, 200)
+    return animationTimer
+  }
 
   const handleSend = useCallback(async (message: Message, deleteCount = 0, plugin: Plugin | null = null) => {
     if (!selectedConversation) return;
@@ -275,6 +339,8 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
     homeDispatch({ field: 'selectedConversation', value: updatedConversation });
     homeDispatch({ field: 'messageIsStreaming', value: true });
+
+    dispatchLoadingAndStreaming(true, true)
 
     while (true) {
       let newUpdatedConversation = await processGptResponse(updatedConversation);
@@ -499,11 +565,14 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                   </div>
                 )}
 
-                {selectedConversation?.messages.map((message, index) => (
+              {selectedConversation?.messages.map((message, index) => (
+                 (message.role === "assistant" || message.role === "user") &&
+                  (index == 0 || (index > 0 && selectedConversation?.messages[index-1].role != "function")) ? (
                   <MemoizedChatMessage
                     key={index}
                     message={message}
                     messageIndex={index}
+                    messages={selectedConversation?.messages}
                     onEdit={(editedMessage) => {
                       setCurrentMessage(editedMessage);
                       // discard edited message and the ones that come after then resend
@@ -513,7 +582,8 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                       );
                     }}
                   />
-                ))}
+                ) : null
+              ))}
 
                 {loading && <ChatLoader />}
 

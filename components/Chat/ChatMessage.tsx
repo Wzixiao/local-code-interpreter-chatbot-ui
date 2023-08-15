@@ -12,6 +12,8 @@ import { useTranslation } from 'next-i18next';
 
 import { updateConversation } from '@/utils/app/conversation';
 
+import { generateMarkdownString } from "@/utils/app/message"
+
 import { Message } from '@/types/chat';
 
 import HomeContext from '@/pages/api/home/home.context';
@@ -26,10 +28,11 @@ import remarkMath from 'remark-math';
 export interface Props {
   message: Message;
   messageIndex: number;
+  messages: Message[];
   onEdit?: (editedMessage: Message) => void
 }
 
-export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) => {
+export const ChatMessage: FC<Props> = memo(({ message, messageIndex, messages, onEdit }) => {
   const { t } = useTranslation('chat');
 
   const {
@@ -81,6 +84,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
     } else {
       messages.splice(findIndex, 1);
     }
+
     const updatedConversation = {
       ...selectedConversation,
       messages,
@@ -90,6 +94,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
       updatedConversation,
       conversations,
     );
+
     homeDispatch({ field: 'selectedConversation', value: single });
     homeDispatch({ field: 'conversations', value: all });
   };
@@ -127,28 +132,8 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
     }
   }, [isEditing]);
 
-  const markdownLanguageMap = {
-    code: "python",
-    command: "shell"
-  }
 
-  function extractKeyValueAndContent(str: string) {
-    const match = str.match(/"(command|code)"\s*:\s*['"]([^'"]+)/);
-
-    if (match && match[1] && match[2]) {
-      return {
-        key: match[1],
-        content: match[2]
-      };
-    }
-
-    return null;
-  }
-
-  let viewCode = ""
-
-  viewCode += message.function_call? `\`\`\`${message.function_call.arguments}\`\`\``:""
-  viewCode += message.content? message.content : ""
+  const viewCode = generateMarkdownString(messages, messageIndex)
 
   
   return (
@@ -288,9 +273,7 @@ export const ChatMessage: FC<Props> = memo(({ message, messageIndex, onEdit }) =
                   },
                 }}
               >
-                {`${viewCode
-                  }${messageIsStreaming && messageIndex == (selectedConversation?.messages.length ?? 0) - 1 ? '`▍`' : ''
-                  }`}
+                {`${viewCode} ${messageIsStreaming && messageIndex == (messages.length ?? 0) - 1 ? '`▍`' : ''}`}
               </MemoizedReactMarkdown>
 
               <div className="md:-mr-8 ml-1 md:ml-0 flex flex-col md:flex-row gap-4 md:gap-1 items-center md:items-start justify-end md:justify-start">
