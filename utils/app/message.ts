@@ -63,6 +63,27 @@ function parseAssistant(message: Message): string {
     return viewStr
 }
 
+function codeViewparseAssistant(message: Message): string {
+    const functionArguments = message.function_call?.arguments
+    
+    let viewStr = ""
+
+    if (functionArguments){
+        const keyWithValue = extractKeyValueAndContent(functionArguments)
+        viewStr += "\n"
+
+        viewStr += generateCodeStr(
+            keyWithValue && keyWithValue.content ? keyWithValue.content : "",
+            (keyWithValue && keyWithValue.key && keyWithValue?.key in markdownLanguageMap) ? markdownLanguageMap[keyWithValue?.key as keyof typeof markdownLanguageMap]
+            : ""
+        )
+        
+    }
+
+    return viewStr
+}
+
+
 
 export const generateMarkdownString = (messages: Message[], index: number) => {
     const viewStrs: string[] = [];
@@ -91,5 +112,20 @@ export const generateMarkdownString = (messages: Message[], index: number) => {
         }
     }
 
+    return viewStrs.join("\n");
+};
+
+export const codeGenerateMarkdownString = (messages: Message[], index: number) => {
+    const viewStrs: string[] = [];    
+
+    const message = messages[index];
+    console.log(messages)
+    viewStrs.push(codeViewparseAssistant(message))
+    
+    if (messages.length > index+1 && messages[index + 1].role == "function"){
+  
+        viewStrs.push(parseFunctionResult(messages[index + 1]));
+    }
+    console.log("viewStrs"+viewStrs)
     return viewStrs.join("\n");
 };

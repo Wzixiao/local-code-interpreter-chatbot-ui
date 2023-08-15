@@ -3,14 +3,15 @@ import { IconArrowBarLeft, IconArrowBarRight } from '@tabler/icons-react';
 interface Props {
   onClick: any;
   side: 'left' | 'right';
+  triggerButtonTitle?: string;
 }
 
-export const CloseSidebarButton = ({ onClick, side }: Props) => {
+export const CloseSidebarButton = ({ onClick, side, triggerButtonTitle }: Props) => {
   return (
     <>
       <button
-        className={`fixed top-5 ${
-          side === 'right' ? 'right-[270px]' : 'left-[270px]'
+        className={`fixed top-5 transition-all ${
+          side === 'right' ? triggerButtonTitle === 'Prompt'? 'right-[270px]' : 'right-[360px]' : 'left-[270px]'
         } z-50 h-7 w-7 hover:text-gray-400 dark:text-white dark:hover:text-gray-300 sm:top-0.5 sm:${
           side === 'right' ? 'right-[270px]' : 'left-[270px]'
         } sm:h-8 sm:w-8 sm:text-neutral-700`}

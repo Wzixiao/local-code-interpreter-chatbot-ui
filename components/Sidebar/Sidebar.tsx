@@ -9,6 +9,7 @@ import {
 } from './components/OpenCloseButton';
 
 import Search from '../Search';
+import { CodeComponent } from '@/components/Promptbar/components/CodeView'
 
 interface Props<T> {
   isOpen: boolean;
@@ -63,11 +64,11 @@ const Sidebar = <T,>({
 
   return isOpen ? (
     <div>
-      <div
-        className={`fixed top-0 ${side}-0 z-40 flex h-full w-[260px] flex-none flex-col space-y-2 bg-[#202123] p-2 text-[14px] transition-all sm:relative sm:top-0`}
-      >
+
         {side === 'right' ? (
-          <div>
+          <div id='viewBox'
+          className={ triggerButtonTitle === 'Prompt' ?  `fixed top-0 ${side}-0 z-40 flex h-full w-[260px] flex-none flex-col space-y-2 bg-[#202123] p-2 text-[14px] transition-all sm:relative sm:top-0` : `fixed top-0 ${side}-0 z-40 flex h-full w-[350px] flex-none flex-col space-y-2 bg-[#202123] p-2 text-[14px] transition-all sm:relative sm:top-0`}
+        >
             <button
               className="w100 text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
               onClick={() => {
@@ -80,6 +81,7 @@ const Sidebar = <T,>({
             <Fragment>
             <div className="flex items-center">
               <button
+                
                 className="text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
                 onClick={() => {
                   handleCreateItem();
@@ -127,12 +129,18 @@ const Sidebar = <T,>({
           </Fragment> : 
             <div>
               {selectedConversation?.messages.map((message, i) => {
-                return (<div></div>)
+                return (
+                  message.role === "assistant" ? <CodeComponent index={i} selectedConversation={selectedConversation}/> : ''
+                )
               })}
             </div>
             }
           </div>
-          ) : <Fragment>
+          ) : 
+          <div 
+          className={`fixed top-0 ${side}-0 z-40 flex h-full w-[260px] flex-none flex-col space-y-2 bg-[#202123] p-2 text-[14px] transition-all sm:relative sm:top-0`}
+        >
+          <Fragment>
                 <div className="flex items-center">
                   <button
                     className="text-sidebar flex w-[190px] flex-shrink-0 cursor-pointer select-none items-center gap-3 rounded-md border border-white/20 p-3 text-white transition-colors duration-200 hover:bg-gray-500/10"
@@ -180,18 +188,19 @@ const Sidebar = <T,>({
                   )}
                 </div>
               </Fragment>
+              {footerComponent}
+
+          </div>
           }
         
       
 
       
-        {footerComponent}
-      </div>
 
-      <CloseSidebarButton onClick={toggleOpen} side={side} />
+      <CloseSidebarButton onClick={toggleOpen} side={side} triggerButtonTitle={triggerButtonTitle} />
     </div>
   ) : (
-    <OpenSidebarButton onClick={toggleOpen} side={side} />
+    <OpenSidebarButton onClick={toggleOpen} side={side} triggerButtonTitle={triggerButtonTitle}/>
   );
 };
 
