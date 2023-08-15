@@ -95,30 +95,33 @@ export const OpenAIStream = async (
 };
 
 
-export const processSSEStream = async <T>(readableStream: ReadableStream<Uint8Array>, onMessage: (message:T) => void) => {
+export const processSSEStream = async <T>(readableStream: ReadableStream<Uint8Array>, onMessage:(message:T) => void) => {
   const decoder = new TextDecoder(); // 用于将Uint8Array转换为字符串
   const reader = readableStream.getReader();
 
-  while (true) {
+  let isContinue = true
+  while (isContinue) {
     const { value, done } = await reader.read();
 
     if (done) {
-      break;
+      isContinue = false
     }
 
     const strValue = decoder.decode(value, { stream: true });
-
-    if (strValue.indexOf("[DONE]") != -1){
-      break
-    }
     
     const jsonStrList = strValue.split("data: ")
 
     for (let chunk of jsonStrList){
+      if (chunk && chunk.indexOf("[DONE]") != -1){
+        isContinue = false
+        break
+      }
+
       if (chunk){
         const chunkJson: T = JSON.parse(chunk)
         onMessage(chunkJson)
       }
     }
+
   }
 }

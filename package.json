@@ -11,6 +11,7 @@
     "lint": "next lint",
     "format": "prettier --write .",
     "test": "vitest",
+    "unit-test": "node unitTest/main.js",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
