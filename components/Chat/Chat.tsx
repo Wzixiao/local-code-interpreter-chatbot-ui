@@ -280,19 +280,12 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     await processSSEStream<CodeExcuteResult>(response.body, async (result: CodeExcuteResult) => {
       codeMessage.content += result.content;
 
+      updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
+
       if (codeResultIsFirst) {
         clearInterval(animationTimer)
-        if (updatedConversation.messages[updatedConversation.messages.length - 1].name == "animation"){
-          updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
-        }else{
-          updatedConversation.messages.push(codeMessage);
-        }
-        
         codeResultIsFirst = false;
-      } else {
-        updatedConversation.messages[updatedConversation.messages.length - 1] = codeMessage;
       }
-      console.log("updatedConversation", updatedConversation);
       
       homeDispatch({
         field: 'selectedConversation',
@@ -338,11 +331,10 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     };
 
     homeDispatch({ field: 'selectedConversation', value: updatedConversation });
-    homeDispatch({ field: 'messageIsStreaming', value: true });
-
-    dispatchLoadingAndStreaming(true, true)
 
     while (true) {
+      dispatchLoadingAndStreaming(true, true)
+
       let newUpdatedConversation = await processGptResponse(updatedConversation);
       if (!newUpdatedConversation) break;
       updatedConversation = newUpdatedConversation
@@ -351,8 +343,8 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
 
       newUpdatedConversation = await processCodeResponse(newUpdatedConversation);
       if (!newUpdatedConversation) break;
+
       updatedConversation = newUpdatedConversation
-      
       saveConversationToLoacl(newUpdatedConversation);
     }
 
