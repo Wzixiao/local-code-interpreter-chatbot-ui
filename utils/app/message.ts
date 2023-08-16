@@ -5,7 +5,7 @@ const markdownLanguageMap = {
     command: "shell"
 }
 
-function extractKeyValueAndContent(str: string) {
+export function extractKeyValueAndContent(str: string) {
     const match = str.match(/"(command|code)"\s*:\s*"((?:[^"\\]|\\.)*?)"/);
     
     if (match && match[1] && match[2]) {
@@ -19,7 +19,7 @@ function extractKeyValueAndContent(str: string) {
 }
 
 function generateCodeStr(code: string, label: string | null = null): string {
-    return `\`\`\`${label?label:""}\n${code.replaceAll("\\n", "\n")}\n\`\`\``
+    return `\`\`\`${label?label:""}\n${code}\n\`\`\``
 }
 
 
@@ -33,8 +33,10 @@ function parseFunctionResult(message: Message): string {
     if (!content){
         return ""
     }
-
-    if (content.length >= 300){
+   
+    
+    if (content.length >= 500 || content.split("\n").length > 50){
+        console.log(content.split("\n").length);
         return generateCodeStr(JSON.stringify(content), "Result")
     }
     
@@ -53,7 +55,7 @@ function parseAssistant(message: Message): string {
         viewStr += "\n"
 
         viewStr += generateCodeStr(
-            keyWithValue && keyWithValue.content ? keyWithValue.content : "",
+            keyWithValue && keyWithValue.content ? keyWithValue.content.replaceAll("\\n", "\n") : "",
             (keyWithValue && keyWithValue.key && keyWithValue?.key in markdownLanguageMap) ? markdownLanguageMap[keyWithValue?.key as keyof typeof markdownLanguageMap]
             : ""
         )
@@ -74,7 +76,7 @@ export const generateMarkdownString = (messages: Message[], index: number) => {
         switch (message.role) {
             case "user":
                 userCount++;
-                if (userCount >= 2) {
+                if (userCount >= 1) {
                     return viewStrs.join("\n");
                 }
                 viewStrs.push(parseUser(message));

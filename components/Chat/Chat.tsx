@@ -24,7 +24,7 @@ import { throttle } from '@/utils/data/throttle';
 import { ChatBody, Conversation, Message, GptAnswerJson, CodeExcuteResult, } from '@/types/chat';
 import { Plugin } from '@/types/plugin';
 import { processSSEStream } from "@/utils/server/index"
-
+import { extractKeyValueAndContent } from "@/utils/app/message"
 
 import HomeContext from '@/pages/api/home/home.context';
 
@@ -106,7 +106,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
         return message
       }
 
-      message.content = message.content
+      message.content = message.content?.slice(-3000)
       return message
     })
   }
@@ -142,6 +142,24 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
   }
 
   const sendCode = async (functionArguments: string, functionName: string, sessionId: string): Promise<Response> => {
+    let functionArgumentsJson;
+
+    // First try to see if it can be parsed normally
+    try{
+      functionArgumentsJson = JSON.parse(functionArguments)
+    }catch{
+      // If the parsing fails, use regular
+      const keyWithValue = extractKeyValueAndContent(functionArguments)
+      if (keyWithValue && keyWithValue.content && keyWithValue.key){
+        functionArgumentsJson = { [keyWithValue.key]: keyWithValue.content }
+      }else{
+        // If it still doesn't work, return an error
+        return new Promise((resolve)=>{
+          resolve(new Response(new Blob(["The json parsing error of the returned function format."]).stream()))
+        })
+      }
+    }
+
     const response = await fetch("http://localhost:5000/execute", {
       method: 'POST',
       headers: {
@@ -150,7 +168,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
       body: JSON.stringify({
         functionName,
         sessionId,
-        arguments: JSON.parse(functionArguments)
+        arguments: functionArgumentsJson
       }),
     });
 
@@ -285,6 +303,9 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
       if (codeResultIsFirst) {
         clearInterval(animationTimer)
         codeResultIsFirst = false;
+        updatedConversation.messages = updatedConversation.messages.filter((message: Message)=>{
+          return message.name != "animation"
+        })
       }
       
       homeDispatch({
@@ -558,7 +579,7 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                 )}
 
               {selectedConversation?.messages.map((message, index) => (
-                 (message.role === "assistant" || message.role === "user") &&
+                (message.role === "assistant" || message.role === "user") &&
                   (index == 0 || (index > 0 && selectedConversation?.messages[index-1].role != "function")) ? (
                   <MemoizedChatMessage
                     key={index}

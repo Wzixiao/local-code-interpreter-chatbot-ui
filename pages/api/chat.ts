@@ -36,10 +36,11 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     const prompt_tokens = encoding.encode(promptToSend);
-
+    
     let tokenCount = prompt_tokens.length;
     let messagesToSend: Message[] = [];
 
+    
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i];
       if (message.content){
@@ -48,10 +49,22 @@ const handler = async (req: Request): Promise<Response> => {
         if (tokenCount + tokens.length + 1000 > model.tokenLimit) {
           break;
         }
+
         tokenCount += tokens.length;
         messagesToSend = [message, ...messagesToSend];
       }
     }
+
+    let toatlLenght = 0
+
+    for (const item of messagesToSend) {
+      if (item.content){
+        const tokens = encoding.encode(item.content);
+        toatlLenght+=tokens.length
+      }
+    }
+    console.log("toatlLenght",toatlLenght);
+    
 
     encoding.free();
 
